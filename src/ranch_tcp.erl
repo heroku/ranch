@@ -41,7 +41,8 @@
 	| {nodelay, boolean()}
 	| {port, inet:port_number()}
 	| {raw, non_neg_integer(), non_neg_integer(),
-		non_neg_integer() | binary()}].
+		non_neg_integer() | binary()}
+	| {max_connections, non_neg_integer()}].
 -export_type([opts/0]).
 
 %% @doc Name of this transport, <em>tcp</em>.
