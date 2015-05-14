@@ -35,7 +35,8 @@
 -export([shutdown/2]).
 -export([close/1]).
 
--type opts() :: [{backlog, non_neg_integer()}
+-type opts() :: [{alpn_preferred_protocols, [binary()]}
+	| {backlog, non_neg_integer()}
 	| {cacertfile, string()}
 	| {cacerts, [Der::binary()]}
 	| {cert, Der::binary()}
@@ -62,6 +63,8 @@
 	| {secure_renegotiate, boolean()}
 	| {send_timeout, timeout()}
 	| {send_timeout_close, boolean()}
+	| {sni_fun, fun((ServerName :: string()) -> opts())}
+	| {sni_hosts, [{inet:hostname(), opts()}]}
 	| {verify, ssl:verify_type()}
 	| {verify_fun, {fun(), InitialUserState::term()}}
 	| {versions, [atom()]}].
@@ -71,7 +74,7 @@ name() -> ssl.
 
 -spec secure() -> boolean().
 secure() ->
-    true.
+	true.
 
 messages() -> {ssl, ssl_closed, ssl_error}.
 
@@ -88,14 +91,14 @@ listen(Opts) ->
 	%% The port in the options takes precedence over the one in the
 	%% first argument.
 	ssl:listen(0, ranch:filter_options(Opts5,
-		[backlog, cacertfile, cacerts, cert, certfile, ciphers,
-			fail_if_no_peer_cert, hibernate_after,
+		[alpn_preferred_protocols, backlog, cacertfile, cacerts,
+			cert, certfile, ciphers, fail_if_no_peer_cert, hibernate_after,
 			honor_cipher_order, ip, key, keyfile, linger,
 			next_protocols_advertised, nodelay,
 			log_alert, partial_chain, password, port, raw,
 			reuse_session, reuse_sessions, secure_renegotiate,
-			send_timeout, send_timeout_close, verify, verify_fun,
-			versions],
+			send_timeout, send_timeout_close, sni_fun, sni_hosts,
+			verify, verify_fun, versions],
 		[binary, {active, false}, {packet, raw},
 			{reuseaddr, true}, {nodelay, true}])).
 
