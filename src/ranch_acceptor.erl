@@ -14,45 +14,69 @@
 
 -module(ranch_acceptor).
 
--export([start_link/3]).
--export([loop/3]).
+-export([start_link/6]).
+-export([loop/7]).
 
--spec start_link(inet:socket(), module(), pid())
+-spec start_link(inet:socket(), module(), reference()| atom(),
+                 atom(), integer(), pid())
 	-> {ok, pid()}.
-start_link(LSocket, Transport, ConnsSup) ->
-	Pid = spawn_link(?MODULE, loop, [LSocket, Transport, ConnsSup]),
+start_link(LSocket, Transport, Ref, Protocol, AckTimeout, ConnsSup) ->
+	Opts = ranch_server:get_protocol_options(Ref),
+	Pid = spawn_link(?MODULE, loop,
+                     [LSocket, Transport, Ref, Protocol,
+                      Opts, AckTimeout, ConnsSup]),
 	{ok, Pid}.
 
--spec loop(inet:socket(), module(), pid()) -> no_return().
-loop(LSocket, Transport, ConnsSup) ->
+-spec loop(inet:socket(), module(), reference()| atom(), atom(),
+           term(), integer(), pid()) ->
+                  no_return().
+loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup) ->
 	_ = case Transport:accept(LSocket, infinity) of
-		{ok, CSocket} ->
-			case Transport:controlling_process(CSocket, ConnsSup) of
-				ok ->
-					%% This call will not return until process has been started
-					%% AND we are below the maximum number of connections.
-					ranch_conns_sup:start_protocol(ConnsSup, CSocket);
-				{error, _} ->
-					Transport:close(CSocket)
-			end;
-		%% Reduce the accept rate if we run out of file descriptors.
-		%% We can't accept anymore anyway, so we might as well wait
-		%% a little for the situation to resolve itself.
-		{error, emfile} ->
-			receive after 100 -> ok end;
-		%% We want to crash if the listening socket got closed.
-		{error, Reason} when Reason =/= closed ->
-			ok
-	end,
+            {ok, Socket} ->
+                case Protocol:start_link(Ref, Socket, Transport, Opts) of
+                    {ok, Pid} ->
+                        case Transport:controlling_process(Socket, Pid) of
+                            ok ->
+                                Pid ! {shoot, Ref, Transport, Socket, AckTimeout},
+                                case application:get_env(ranch, {Ref, max_conns}) of
+                                    {ok, infinity} ->
+                                        ranch_conns_sup:start_protocol_async(ConnsSup, Pid);
+                                    _ ->
+                                        ranch_conns_sup:start_protocol(ConnsSup, Pid)
+                                end;
+                            {error, _} ->
+                                Transport:close(Socket),
+                                exit(Pid, kill)
+                        end;
+                    Ret ->
+                        error_logger:error_msg(
+                          "Ranch listener ~p connection process start failure; "
+                          "~p:start_link/4 returned: ~999999p~n",
+                          [Ref, Protocol, Ret]),
+                        Transport:close(Socket)
+                end;
+            %% Reduce the accept rate if we run out of file descriptors.
+            %% We can't accept anymore anyway, so we might as well wait
+            %% a little for the situation to resolve itself.
+            {error, emfile} ->
+                receive after 100 -> ok end;
+            %% We want to crash if the listening socket got closed.
+            {error, Reason} when Reason =/= closed ->
+                ok
+        end,
 	flush(),
-	?MODULE:loop(LSocket, Transport, ConnsSup).
+	?MODULE:loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup).
 
 flush() ->
-	receive Msg ->
-		error_logger:error_msg(
-			"Ranch acceptor received unexpected message: ~p~n",
-			[Msg]),
-		flush()
+	receive
+        %% ignore replies from ranch_conns_sup when we're sending async
+        Msg when is_pid(Msg) ->
+            flush();
+        Msg ->
+            error_logger:error_msg(
+              "Ranch acceptor received unexpected message: ~p~n",
+              [Msg]),
+            flush()
 	after 0 ->
-		ok
+            ok
 	end.

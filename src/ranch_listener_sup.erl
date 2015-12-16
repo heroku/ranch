@@ -36,7 +36,7 @@ init({Ref, NbAcceptors, Transport, TransOpts, Protocol}) ->
 				[Ref, ConnType, Shutdown, Transport, AckTimeout, Protocol]},
 			permanent, infinity, supervisor, [ranch_conns_sup]},
 		{ranch_acceptors_sup, {ranch_acceptors_sup, start_link,
-				[Ref, NbAcceptors, Transport, TransOpts]},
+				[Ref, NbAcceptors, Protocol, AckTimeout, Transport, TransOpts]},
 			permanent, infinity, supervisor, [ranch_acceptors_sup]}
 	],
 	{ok, {{rest_for_one, 10, 10}, ChildSpecs}}.
