@@ -15,57 +15,50 @@
 -module(ranch_acceptor).
 
 -export([start_link/6]).
--export([loop/7]).
+-export([loop/8]).
 
 -spec start_link(inet:socket(), module(), reference()| atom(),
                  atom(), integer(), pid())
 	-> {ok, pid()}.
-start_link(LSocket, Transport, Ref, Protocol, AckTimeout, ConnsSup) ->
+start_link(PortOpts, Transport, Ref, Protocol, AckTimeout, ConnsSup) ->
 	Opts = ranch_server:get_protocol_options(Ref),
+    {ok, LSocket} = Transport:listen([{raw, 1, 15, <<1:32/native>>}|PortOpts]),
 	Pid = spawn_link(?MODULE, loop,
                      [LSocket, Transport, Ref, Protocol,
-                      Opts, AckTimeout, ConnsSup]),
+                      Opts, AckTimeout, ConnsSup, 0]),
 	{ok, Pid}.
 
 -spec loop(inet:socket(), module(), reference()| atom(), atom(),
-           term(), integer(), pid()) ->
+           term(), integer(), pid(), integer) ->
                   no_return().
-loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup) ->
-	_ = case Transport:accept(LSocket, infinity) of
-            {ok, Socket} ->
-                case Protocol:start_link(Ref, Socket, Transport, Opts) of
-                    {ok, Pid} ->
-                        case Transport:controlling_process(Socket, Pid) of
-                            ok ->
-                                Pid ! {shoot, Ref, Transport, Socket, AckTimeout},
-                                case application:get_env(ranch, {Ref, max_conns}) of
-                                    {ok, infinity} ->
-                                        ranch_conns_sup:start_protocol_async(ConnsSup, Pid);
-                                    _ ->
-                                        ranch_conns_sup:start_protocol(ConnsSup, Pid)
-                                end;
-                            {error, _} ->
-                                Transport:close(Socket),
-                                exit(Pid, kill)
-                        end;
-                    Ret ->
-                        error_logger:error_msg(
-                          "Ranch listener ~p connection process start failure; "
-                          "~p:start_link/4 returned: ~999999p~n",
-                          [Ref, Protocol, Ret]),
-                        Transport:close(Socket)
-                end;
-            %% Reduce the accept rate if we run out of file descriptors.
-            %% We can't accept anymore anyway, so we might as well wait
-            %% a little for the situation to resolve itself.
-            {error, emfile} ->
-                receive after 100 -> ok end;
-            %% We want to crash if the listening socket got closed.
-            {error, Reason} when Reason =/= closed ->
-                ok
-        end,
-	flush(),
-	?MODULE:loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup).
+loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup, Flush) ->
+    prim_inet:async_accept(LSocket, -1),
+    Socks =
+    receive
+        {inet_async, _ListSock, _Ref, {ok, InitSocket}} ->
+            get_socks(LSocket, [InitSocket])
+    end,
+    [begin
+        inet_db:register_socket(Socket, inet_tcp),
+        {ok, Pid} = Protocol:start_link(Ref, Socket, Transport, Opts),
+        Transport:controlling_process(Socket, Pid)
+     end || Socket <- Socks],
+	case Flush of
+        1000 ->
+            %% flush(),
+	        ?MODULE:loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup, 0);
+        _ ->
+	        ?MODULE:loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup, Flush + 1)
+        end.
+
+get_socks(LSocket, Acc) ->
+    prim_inet:async_accept(LSocket, -1),
+    receive
+        {inet_async, _ListSock, _Ref, {ok, InitSocket}} ->
+            get_socks(LSocket, [InitSocket|Acc])
+    after 0 ->
+        Acc
+    end.
 
 flush() ->
 	receive

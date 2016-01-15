@@ -26,18 +26,18 @@ start_link(Ref, NbAcceptors, Protocol, AckTimeout, Transport, TransOpts) ->
 
 init([Ref, NbAcceptors, Protocol, AckTimeout, Transport, TransOpts]) ->
 	ConnsSup = ranch_server:get_connections_sup(Ref),
-	LSocket = case proplists:get_value(socket, TransOpts) of
-		undefined ->
-			{ok, Socket} = Transport:listen(TransOpts),
-			Socket;
-		Socket ->
-			Socket
-	end,
-	{ok, {_, Port}} = Transport:sockname(LSocket),
-	ranch_server:set_port(Ref, Port),
+	%%LSocket = case proplists:get_value(socket, TransOpts) of
+	%%	undefined ->
+	%%		{ok, Socket} = Transport:listen(TransOpts),
+	%%		Socket;
+	%%	Socket ->
+	%%		Socket
+	%%end,
+	%%{ok, {_, Port}} = Transport:sockname(LSocket),
+	%%ranch_server:set_port(Ref, Port),
 	Procs = [
 		{{acceptor, self(), N}, {ranch_acceptor, start_link, [
-			LSocket, Transport, Ref, Protocol, AckTimeout, ConnsSup
+		    TransOpts, Transport, Ref, Protocol, AckTimeout, ConnsSup
 		]}, permanent, brutal_kill, worker, []}
 			|| N <- lists:seq(1, NbAcceptors)],
 	{ok, {{one_for_one, 10, 10}, Procs}}.

@@ -75,7 +75,8 @@ start_protocol(SupPid, ProtoPid) ->
 
 -spec start_protocol_async(pid(), pid()) -> ok.
 start_protocol_async(SupPid, ProtoPid) ->
-	SupPid ! {?MODULE, start_protocol, self(), ProtoPid}.
+    ok.
+	%%SupPid ! {?MODULE, start_protocol, self(), ProtoPid}.
 
 %% We can't make the above assumptions here. This function might be
 %% called from anywhere.
