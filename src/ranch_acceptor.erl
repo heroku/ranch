@@ -77,7 +77,8 @@ flush(Pid) ->
         Msg when is_pid(Msg) ->
             flush(Pid);
         {tcp, _, _} = Data when is_pid(Pid) ->
-            Pid ! Data;
+            Pid ! Data,
+            flush(Pid);
         Msg ->
             error_logger:error_msg(
               "Ranch acceptor received unexpected message: ~p~n",
