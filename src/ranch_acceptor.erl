@@ -47,36 +47,42 @@ loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup) ->
                             {error, _} ->
                                 Transport:close(Socket),
                                 exit(Pid, kill)
-                        end;
+                        end,
+                        LastPid = Pid;
                     Ret ->
                         error_logger:error_msg(
                           "Ranch listener ~p connection process start failure; "
                           "~p:start_link/4 returned: ~999999p~n",
                           [Ref, Protocol, Ret]),
-                        Transport:close(Socket)
+                        Transport:close(Socket),
+                        LastPid = undefined
                 end;
             %% Reduce the accept rate if we run out of file descriptors.
             %% We can't accept anymore anyway, so we might as well wait
             %% a little for the situation to resolve itself.
             {error, emfile} ->
-                receive after 100 -> ok end;
+                receive after 100 -> ok end,
+                LastPid = undefined;
             %% We want to crash if the listening socket got closed.
             {error, Reason} when Reason =/= closed ->
+                LastPid = undefined,
                 ok
         end,
-	flush(),
+	flush(LastPid),
 	?MODULE:loop(LSocket, Transport, Ref, Protocol, Opts, AckTimeout, ConnsSup).
 
-flush() ->
+flush(Pid) ->
 	receive
         %% ignore replies from ranch_conns_sup when we're sending async
         Msg when is_pid(Msg) ->
-            flush();
+            flush(Pid);
+        {tcp, _, _} = Data when is_pid(Pid) ->
+            Pid ! Data;
         Msg ->
             error_logger:error_msg(
               "Ranch acceptor received unexpected message: ~p~n",
               [Msg]),
-            flush()
-	after 0 ->
+            flush(Pid)
+	after 1 ->
             ok
 	end.
